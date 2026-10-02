@@ -1,0 +1,12 @@
+# How many vexes each shot summons
+vex-count: 8
+
+# How long the vexes live before vanishing (seconds)
+vex-lifetime-seconds: 20
+
+# Delay between shots (seconds). A shot with no target in range doesn't use the cooldown.
+cooldown-seconds: 30
+
+# How far the cannon looks for a target (blocks). It prefers the player in your
+# crosshair, otherwise it picks the nearest other player within this range.
+range: 40
