@@ -52,44 +52,53 @@ public final class VexCannonPlugin extends JavaPlugin implements TabExecutor, Li
     private final Map<UUID, Long> lastUse = new HashMap<>();
     private final Map<UUID, Summon> summons = new HashMap<>();
 
-    private int vexCount;
-    private double lifetimeSeconds;
-    private long cooldownMs;
-    private double range;
+    // Defaults, so everything still works even if the config can't be read
+    private int vexCount = 8;
+    private double lifetimeSeconds = 20.0;
+    private long cooldownMs = 30_000L;
+    private double range = 40.0;
 
     // ------------------------------------------------------------------ lifecycle
 
     @Override
     public void onEnable() {
-        saveDefaultConfig();
-        vexCount = Math.max(1, Math.min(32, getConfig().getInt("vex-count", 8)));
-        lifetimeSeconds = Math.max(1.0, getConfig().getDouble("vex-lifetime-seconds", 20.0));
-        cooldownMs = (long) (Math.max(0.0, getConfig().getDouble("cooldown-seconds", 30.0)) * 1000);
-        range = Math.max(5.0, getConfig().getDouble("range", 40.0));
+        // 1. Command + listeners FIRST, so /vexcannon works even if something below fails
+        PluginCommand cmd = getCommand("vexcannon");
+        if (cmd == null) {
+            getLogger().severe("Command 'vexcannon' is missing from plugin.yml. The plugin.yml inside the jar is wrong.");
+        } else {
+            cmd.setExecutor(this);
+            cmd.setTabCompleter(this);
+        }
+        getServer().getPluginManager().registerEvents(this, this);
 
         cannonKey = new NamespacedKey(this, "vex_cannon");
         recipeKey = new NamespacedKey(this, "vex_cannon_recipe");
 
+        // 2. Config
+        try {
+            saveDefaultConfig();
+            vexCount = Math.max(1, Math.min(32, getConfig().getInt("vex-count", 8)));
+            lifetimeSeconds = Math.max(1.0, getConfig().getDouble("vex-lifetime-seconds", 20.0));
+            cooldownMs = (long) (Math.max(0.0, getConfig().getDouble("cooldown-seconds", 30.0)) * 1000);
+            range = Math.max(5.0, getConfig().getDouble("range", 40.0));
+        } catch (Exception ex) {
+            getLogger().log(Level.SEVERE, "Problem reading config.yml, using default settings:", ex);
+        }
+
+        // 3. Recipe
         boolean registered = registerRecipe();
         if (registered) {
             getLogger().info("Vex Cannon recipe registered OK.");
+            for (Player p : Bukkit.getOnlinePlayers()) p.discoverRecipe(recipeKey);
         } else {
             getLogger().severe("Vex Cannon recipe did NOT register. See any error above this line.");
         }
 
-        getServer().getPluginManager().registerEvents(this, this);
-        PluginCommand cmd = getCommand("vexcannon");
-        if (cmd != null) {
-            cmd.setExecutor(this);
-            cmd.setTabCompleter(this);
-        }
-
-        // Keeps vexes locked on their target and removes them when time is up
+        // 4. Keeps vexes locked on their target and removes them when time is up
         Bukkit.getScheduler().runTaskTimer(this, this::tickSummons, 10L, 10L);
 
-        if (registered) {
-            for (Player p : Bukkit.getOnlinePlayers()) p.discoverRecipe(recipeKey);
-        }
+        getLogger().info("VexCannon enabled. Command registered: " + (cmd != null));
     }
 
     @Override
@@ -99,7 +108,7 @@ public final class VexCannonPlugin extends JavaPlugin implements TabExecutor, Li
             if (e != null) e.remove();
         }
         summons.clear();
-        Bukkit.removeRecipe(recipeKey);
+        if (recipeKey != null) Bukkit.removeRecipe(recipeKey);
     }
 
     // ------------------------------------------------------------------ item + recipe
@@ -293,10 +302,19 @@ public final class VexCannonPlugin extends JavaPlugin implements TabExecutor, Li
 
     // ------------------------------------------------------------------ commands
 
+    private boolean isAdmin(CommandSender sender) {
+        return sender.isOp() || sender.hasPermission("vexcannon.admin");
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
+        if (!isAdmin(sender)) {
+            sender.sendMessage("§cYou need operator permission (vexcannon.admin) to use this command.");
+            return true;
+        }
+
         if (args.length == 0) {
-            sender.sendMessage("§7Usage: /vexcannon give [player] | /vexcannon recipe");
+            sender.sendMessage("§7VexCannon is running. Usage: /vexcannon give [player] | /vexcannon recipe");
             return true;
         }
 
@@ -344,6 +362,7 @@ public final class VexCannonPlugin extends JavaPlugin implements TabExecutor, Li
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command cmd, String alias, String[] args) {
+        if (!isAdmin(sender)) return List.of();
         if (args.length == 1) {
             return Stream.of("give", "recipe")
                     .filter(s -> s.startsWith(args[0].toLowerCase()))
